@@ -32,9 +32,8 @@ A comprehensive backup solution for Linux system administrators with advanced fe
    chmod +x backup_sync.sh
    ```
 
-3. Copy and customize the configuration:
+3. Customize the configuration:
    ```bash
-   cp backup_config.conf.example backup_config.conf
    nano backup_config.conf
    ```
 
