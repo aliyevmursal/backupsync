@@ -23,7 +23,7 @@ A comprehensive backup solution for Linux system administrators with advanced fe
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/mursalaliyev/backup-sync.git
+   git clone https://github.com/aliyevmursal/backup-sync.git
    cd backup-sync
    ```
 
