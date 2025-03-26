@@ -10,17 +10,17 @@ A comprehensive backup solution for Linux system administrators with advanced fe
 | <img src="https://raw.githubusercontent.com/lipis/flag-icons/main/flags/4x3/tr.svg" width="22"> 🇹🇷 Turkish | [Türkçe](README.tr.md) |
 | <img src="https://raw.githubusercontent.com/lipis/flag-icons/main/flags/4x3/az.svg" width="22"> 🇦🇿 Azerbaijani | [Azərbaycanca](README.az.md) |
 
-## Features
+🚀 BackupSync – Key Features
 
-- **Timestamped Backups**: Creates a unique timestamped folder for each backup operation
-- **Incremental Backups**: Save space and time by only backing up changes since the last full backup
-- **Configurable Source/Destination**: Easily specify what to backup and where
-- **Optional Compression**: Choose whether to compress backups using tar.gz format
-- **Notification System**: Get email or Telegram alerts when backups complete
-- **Automatic Cleanup**: Automatically remove backups older than specified days
-- **Cloud/Network Support**: Upload backups to AWS S3, FTP servers, or remote servers via SSH
-- **Scheduling Support**: Designed to work seamlessly with cron jobs
-- **Restore Functionality**: Easily restore from any full or incremental backup
+🕒 Timestamped Backups – Creates a unique timestamped folder for each backup operation
+🔄 Incremental Backups – Save space and time by only backing up changes since the last full backup
+📂 Configurable Source/Destination – Easily specify what to backup and where
+📦 Optional Compression – Choose whether to compress backups using tar.gz format
+📢 Notification System – Get email or Telegram alerts when backups complete
+🗑️ Automatic Cleanup – Automatically remove backups older than specified days
+☁️ Cloud/Network Support – Upload backups to AWS S3, FTP servers, or remote servers via SSH
+⏳ Scheduling Support – Designed to work seamlessly with cron jobs
+🔄 Restore Functionality – Easily restore from any full or incremental backup
 
 ## Requirements
 
