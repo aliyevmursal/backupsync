@@ -1,6 +1,14 @@
-# BackupSync
+🚀 BackupSync is a powerful backup solution that efficiently manages full and incremental backups. It optimizes storage usage while ensuring fast and reliable data protection.
+
+
 
 A comprehensive backup solution for Linux system administrators with advanced features.
+
+| Language | README |
+| --- | --- |
+| <img src="https://raw.githubusercontent.com/lipis/flag-icons/main/flags/4x3/us.svg" width="22"> 🇺🇸 English | [English](README.md) |
+| <img src="https://raw.githubusercontent.com/lipis/flag-icons/main/flags/4x3/tr.svg" width="22"> 🇹🇷 Turkish | [Türkçe](README.tr.md) |
+| <img src="https://raw.githubusercontent.com/lipis/flag-icons/main/flags/4x3/az.svg" width="22"> 🇦🇿 Azerbaijani | [Azərbaycanca](README.az.md) |
 
 ## Features
 
@@ -161,59 +169,6 @@ ENABLE_TELEGRAM_NOTIFICATION=true
 TELEGRAM_BOT_TOKEN="your-bot-token"
 TELEGRAM_CHAT_ID="your-chat-id"
 ```
-
-## How Incremental Backups Work
-
-### Technical Implementation
-- Full backups are marked with `.full_backup` files
-- Incremental backups contain `.incremental_backup` files that reference the parent full backup
-- For compressed backups:
-  - Uses `find` to identify changed files since last backup
-  - Creates a list of changed files in `changed_files.txt`
-  - Uses `tar` with the `-T` option to only include changed files
-- For uncompressed backups:
-  - Uses rsync's `--link-dest` feature to create efficient hard links
-  - Only new or modified files consume additional disk space
-  - Unchanged files are hard-linked to save space while maintaining a complete backup snapshot
-
-### Restoration Process
-When restoring from an incremental backup:
-1. The script identifies the parent full backup
-2. It restores the full backup first
-3. It identifies and orders all intermediate incremental backups
-4. It applies each incremental backup in chronological order
-5. Finally, it applies the target incremental backup
-
-This ensures that the restored data represents exactly what existed at the time of the target backup.
-
-## Command-Line Options
-
-```bash
-# Perform backup (according to configuration)
-./backup_sync.sh
-
-# Restore from backup
-./backup_sync.sh restore <backup_directory> [target_directory]
-```
-
-## Troubleshooting
-
-### Common Issues
-
-- **Permission Denied**: Ensure the script has proper permissions to read the source directory and write to the destination directory
-- **Incremental Backup Failed**: Check if the referenced full backup exists and hasn't been deleted
-- **Cloud Upload Failed**: Verify your network connection and cloud service credentials
-- **Notification Failed**: Check your email/Telegram configuration settings
-
-### Log File Analysis
-
-Examine the log files in the `logs/` directory for detailed information:
-
-```bash
-cat logs/backup_20250326_120101.log
-```
-
-Look for warnings or errors that might indicate what went wrong.
 
 ## License
 
