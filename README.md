@@ -33,8 +33,8 @@ A comprehensive backup solution for Linux system administrators with advanced fe
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/aliyevmursal/backup-sync.git
-   cd backup-sync
+   git clone https://github.com/aliyevmursal/backupsync.git
+   cd backupsync
    ```
 
 2. Make the script executable:
