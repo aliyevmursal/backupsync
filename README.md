@@ -1,7 +1,5 @@
 🚀 BackupSync is a powerful backup solution that efficiently manages full and incremental backups. It optimizes storage usage while ensuring fast and reliable data protection.
 
-
-
 A comprehensive backup solution for Linux system administrators with advanced features.
 
 | Language | README |
@@ -12,7 +10,6 @@ A comprehensive backup solution for Linux system administrators with advanced fe
 
 🚀 BackupSync – Key Features
 
-
 - **🕒 Timestamped Backups**: Creates a unique timestamped folder for each backup operation
 - **🔄 Incremental Backups**: Save space and time by only backing up changes since the last full backup
 - **📂 Configurable Source/Destination**: Easily specify what to backup and where
@@ -22,11 +19,19 @@ A comprehensive backup solution for Linux system administrators with advanced fe
 - **☁️ Cloud/Network Support**: Upload backups to AWS S3, FTP servers, or remote servers via SSH
 - **⏳ Scheduling Support**: Designed to work seamlessly with cron jobs
 - **🔄 Restore Functionality**: Easily restore from any full or incremental backup
+- **🔐 Encryption Support**: Secure your backups with AES-256 encryption
+- **✅ Backup Verification**: Ensure backup integrity with automatic verification
+- **🗃️ Database Backup**: Support for MySQL/MariaDB and PostgreSQL databases
+- **⚙️ Advanced Backup Features**: File exclusion patterns and deduplication
+- **💾 Disk Space Monitoring**: Automatically check for sufficient disk space before backup
+
 ## Requirements
 
 - Bash shell
 - Standard Linux utilities (tar, rsync)
 - For notifications: mail command (for email) or curl (for Telegram)
+- For encryption: openssl
+- For database backup: mysqldump (MySQL/MariaDB) or pg_dump (PostgreSQL)
 - For cloud backup: aws CLI (for S3), curl (for FTP), or rsync/ssh (for remote servers)
 
 ## Installation
@@ -61,6 +66,25 @@ BACKUP_RETENTION_DAYS=30  # How long to keep old backups (0 for unlimited)
 ENABLE_COMPRESSION=true
 ENABLE_INCREMENTAL=false
 INCREMENTAL_MAX_FULL=7  # Days between full backups when using incremental
+
+# Database backup settings
+ENABLE_DATABASE_BACKUP=false
+DATABASE_TYPE="mysql"  # mysql or postgresql
+DB_HOST="localhost"
+DB_PORT="3306"  # 3306 for MySQL, 5432 for PostgreSQL
+DB_USER="root"
+DB_PASSWORD=""
+DB_NAMES=""  # Empty for all databases, comma-separated list for specific ones
+
+# Advanced backup features
+FILE_EXCLUSION_PATTERNS="*.tmp,*.log,*~,.git/,.svn/"
+ENABLE_DEDUPLICATION=false
+MIN_DISK_SPACE_MB=1024  # Minimum free space required in MB
+
+# Security settings
+ENABLE_ENCRYPTION=false
+ENCRYPTION_PASSWORD=""
+ENABLE_BACKUP_VERIFICATION=true
 
 # Enable/disable features
 ENABLE_EMAIL_NOTIFICATION=false
@@ -121,6 +145,55 @@ Benefits:
 - Reduced network traffic for cloud backups
 - Maintains the ability to restore from any point in time
 
+## Database Backup Features
+
+BackupSync supports backing up MySQL/MariaDB and PostgreSQL databases:
+
+### MySQL/MariaDB
+- Full database dumps with stored procedures, triggers, and events
+- Option to backup specific databases or all databases
+- Integration with encryption and compression features
+
+### PostgreSQL
+- Custom format backups for efficient storage
+- Option to backup specific databases or all databases
+- Integration with encryption and verification features
+
+## Advanced Backup Features
+
+### File Exclusion
+Specify files and directories to exclude from backup using patterns:
+```bash
+FILE_EXCLUSION_PATTERNS="*.tmp,*.log,*~,.git/,.svn/"
+```
+
+### Deduplication
+Save storage space by eliminating duplicate files across backups:
+```bash
+ENABLE_DEDUPLICATION=true
+```
+
+### Disk Space Monitoring
+Automatically checks for sufficient disk space before starting the backup:
+```bash
+MIN_DISK_SPACE_MB=1024  # Minimum free space in MB
+```
+
+## Security Features
+
+### Encryption
+Protect your backups with AES-256 encryption:
+```bash
+ENABLE_ENCRYPTION=true
+ENCRYPTION_PASSWORD="your-secure-password"
+```
+
+### Backup Verification
+Ensure backup integrity with automatic verification:
+```bash
+ENABLE_BACKUP_VERIFICATION=true
+```
+
 ## Logging
 
 Logs are stored in the `logs/` directory with timestamped filenames. Each backup operation generates a detailed log file.
@@ -163,12 +236,24 @@ ENABLE_EMAIL_NOTIFICATION=true
 EMAIL_RECIPIENT="your-email@example.com"
 ```
 
+Emails include:
+- Backup status (success/failure)
+- Detailed error information if backup failed
+- Disk space information
+- Backup details (type, location, etc.)
+
 ### Telegram Notifications
 ```bash
 ENABLE_TELEGRAM_NOTIFICATION=true
 TELEGRAM_BOT_TOKEN="your-bot-token"
 TELEGRAM_CHAT_ID="your-chat-id"
 ```
+
+Telegram messages include:
+- Backup status with visual indicator (✅/❌)
+- Disk space metrics
+- Backup details
+- Error information if backup failed
 
 ## License
 

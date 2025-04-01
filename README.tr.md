@@ -19,19 +19,26 @@ Linux sistem yöneticileri için gelişmiş özelliklere sahip kapsamlı bir yed
 - **Bulut/Ağ Desteği**: Yedekleri AWS S3, FTP sunucuları veya SSH üzerinden uzak sunuculara yükleyin
 - **Zamanlama Desteği**: Cron işleriyle sorunsuz çalışacak şekilde tasarlanmıştır
 - **Geri Yükleme İşlevi**: Herhangi bir tam veya artımsal yedeklemeden kolayca geri yükleme yapın
+- **Şifreleme Desteği**: Yedeklerinizi AES-256 şifreleme ile güvence altına alın
+- **Yedek Doğrulama**: Otomatik doğrulama ile yedek bütünlüğünü sağlayın
+- **Veritabanı Yedekleme**: MySQL/MariaDB ve PostgreSQL veritabanları için destek
+- **Gelişmiş Yedekleme Özellikleri**: Dosya dışlama desenleri ve veri tekrarını önleme
+- **Disk Alanı İzleme**: Yedekleme öncesinde yeterli disk alanını otomatik olarak kontrol edin
 
 ## Gereksinimler
 
 - Bash kabuğu
 - Standart Linux yardımcı programları (tar, rsync)
 - Bildirimler için: mail komutu (e-posta için) veya curl (Telegram için)
+- Şifreleme için: openssl
+- Veritabanı yedeklemesi için: mysqldump (MySQL/MariaDB) veya pg_dump (PostgreSQL)
 - Bulut yedekleme için: aws CLI (S3 için), curl (FTP için) veya rsync/ssh (uzak sunucular için)
 
 ## Kurulum
 
 1. Bu depoyu klonlayın:
    ```bash
-   git clone https://github.com/aliyevmursal/backup-sync.git
+   git clone https://github.com/aliyevmursal/backupsync.git
    cd backup-sync
    ```
 
@@ -59,6 +66,25 @@ BACKUP_RETENTION_DAYS=30  # Eski yedeklemelerin ne kadar süre tutulacağı (0 s
 ENABLE_COMPRESSION=true
 ENABLE_INCREMENTAL=false
 INCREMENTAL_MAX_FULL=7  # Artımsal kullanırken tam yedeklemeler arasındaki gün sayısı
+
+# Veritabanı yedekleme ayarları
+ENABLE_DATABASE_BACKUP=false
+DATABASE_TYPE="mysql"  # mysql veya postgresql
+DB_HOST="localhost"
+DB_PORT="3306"  # MySQL için 3306, PostgreSQL için 5432
+DB_USER="root"
+DB_PASSWORD=""
+DB_NAMES=""  # Tüm veritabanları için boş, belirli veritabanları için virgülle ayrılmış liste
+
+# Gelişmiş yedekleme özellikleri
+FILE_EXCLUSION_PATTERNS="*.tmp,*.log,*~,.git/,.svn/"
+ENABLE_DEDUPLICATION=false
+MIN_DISK_SPACE_MB=1024  # Gerekli minimum boş alan MB cinsinden
+
+# Güvenlik ayarları
+ENABLE_ENCRYPTION=false
+ENCRYPTION_PASSWORD=""
+ENABLE_BACKUP_VERIFICATION=true
 
 # Özellikleri etkinleştir/devre dışı bırak
 ENABLE_EMAIL_NOTIFICATION=false
@@ -119,6 +145,55 @@ Avantajlar:
 - Bulut yedeklemeleri için azaltılmış ağ trafiği
 - Herhangi bir zamandan geri yükleme yeteneğini korur
 
+## Veritabanı Yedekleme Özellikleri
+
+BackupSync, MySQL/MariaDB ve PostgreSQL veritabanlarını yedeklemeyi destekler:
+
+### MySQL/MariaDB
+- Saklı yordamlar, tetikleyiciler ve olaylarla tam veritabanı dökümü
+- Belirli veritabanlarını veya tüm veritabanlarını yedekleme seçeneği
+- Şifreleme ve sıkıştırma özellikleriyle entegrasyon
+
+### PostgreSQL
+- Verimli depolama için özel format yedeklemeler
+- Belirli veritabanlarını veya tüm veritabanlarını yedekleme seçeneği
+- Şifreleme ve doğrulama özellikleriyle entegrasyon
+
+## Gelişmiş Yedekleme Özellikleri
+
+### Dosya Dışlama
+Desenler kullanarak yedeklemeden hariç tutulacak dosya ve dizinleri belirtin:
+```bash
+FILE_EXCLUSION_PATTERNS="*.tmp,*.log,*~,.git/,.svn/"
+```
+
+### Veri Tekrarını Önleme (Deduplikasyon)
+Yedeklemeler arasında yinelenen dosyaları ortadan kaldırarak depolama alanından tasarruf edin:
+```bash
+ENABLE_DEDUPLICATION=true
+```
+
+### Disk Alanı İzleme
+Yedeklemeye başlamadan önce yeterli disk alanını otomatik olarak kontrol eder:
+```bash
+MIN_DISK_SPACE_MB=1024  # MB cinsinden minimum boş alan
+```
+
+## Güvenlik Özellikleri
+
+### Şifreleme
+Yedeklerinizi AES-256 şifrelemesi ile koruyun:
+```bash
+ENABLE_ENCRYPTION=true
+ENCRYPTION_PASSWORD="your-secure-password"
+```
+
+### Yedek Doğrulama
+Otomatik doğrulama ile yedek bütünlüğünü sağlayın:
+```bash
+ENABLE_BACKUP_VERIFICATION=true
+```
+
 ## Günlük Kaydı
 
 Günlükler, zaman damgalı dosya adlarıyla `logs/` dizininde saklanır. Her yedekleme işlemi ayrıntılı bir günlük dosyası oluşturur.
@@ -161,12 +236,24 @@ ENABLE_EMAIL_NOTIFICATION=true
 EMAIL_RECIPIENT="your-email@example.com"
 ```
 
+E-postalar şunları içerir:
+- Yedekleme durumu (başarılı/başarısız)
+- Yedekleme başarısız olursa ayrıntılı hata bilgileri
+- Disk alanı bilgileri
+- Yedekleme ayrıntıları (tür, konum vb.)
+
 ### Telegram Bildirimleri
 ```bash
 ENABLE_TELEGRAM_NOTIFICATION=true
 TELEGRAM_BOT_TOKEN="your-bot-token"
 TELEGRAM_CHAT_ID="your-chat-id"
 ```
+
+Telegram mesajları şunları içerir:
+- Görsel gösterge ile yedekleme durumu (✅/❌)
+- Disk alanı metrikleri
+- Yedekleme ayrıntıları
+- Yedekleme başarısız olursa hata bilgileri
 
 ## Lisans
 

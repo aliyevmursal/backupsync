@@ -14,6 +14,10 @@
 #   - Auto cleanup
 #   - Cloud/Network backup
 #   - Cron scheduling support
+#   - Database backup support
+#   - Advanced backup features
+#   - Security enhancements
+#   - Disk space monitoring
 #
 ################################################################################
 
@@ -56,6 +60,27 @@ REMOTE_USER="${REMOTE_USER:-}"
 REMOTE_PATH="${REMOTE_PATH:-}"
 SSH_KEY_PATH="${SSH_KEY_PATH:-}"
 
+# Database backup settings
+ENABLE_DATABASE_BACKUP="${ENABLE_DATABASE_BACKUP:-false}"
+DATABASE_TYPE="${DATABASE_TYPE:-mysql}"
+DB_HOST="${DB_HOST:-localhost}"
+DB_PORT="${DB_PORT:-3306}"
+DB_USER="${DB_USER:-root}"
+DB_PASSWORD="${DB_PASSWORD:-}"
+DB_NAMES="${DB_NAMES:-}"
+
+# Advanced backup settings
+FILE_EXCLUSION_PATTERNS="${FILE_EXCLUSION_PATTERNS:-}"
+ENABLE_DEDUPLICATION="${ENABLE_DEDUPLICATION:-false}"
+
+# Security settings
+ENABLE_ENCRYPTION="${ENABLE_ENCRYPTION:-false}"
+ENCRYPTION_PASSWORD="${ENCRYPTION_PASSWORD:-}"
+ENABLE_BACKUP_VERIFICATION="${ENABLE_BACKUP_VERIFICATION:-true}"
+
+# Disk space settings
+MIN_DISK_SPACE_MB="${MIN_DISK_SPACE_MB:-1024}" # Minimum free space in MB
+
 # Create log directory
 LOG_DIR="${SCRIPT_DIR}/logs"
 mkdir -p "$LOG_DIR"
@@ -63,12 +88,56 @@ mkdir -p "$LOG_DIR"
 # Generate timestamp
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="${LOG_DIR}/backup_${TIMESTAMP}.log"
+ERROR_LOG_FILE="${LOG_DIR}/backup_error_${TIMESTAMP}.log"
+
+# Backup status
+BACKUP_STATUS="success"
+ERROR_MESSAGE=""
 
 # Function to log messages
 log() {
     local message="$1"
     local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
     echo "[$timestamp] $message" | tee -a "$LOG_FILE"
+}
+
+# Function to log errors
+log_error() {
+    local message="$1"
+    local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+    BACKUP_STATUS="failed"
+    ERROR_MESSAGE="${ERROR_MESSAGE}${message}\n"
+    echo "[$timestamp] ERROR: $message" | tee -a "$LOG_FILE" | tee -a "$ERROR_LOG_FILE"
+}
+
+# Function to check disk space
+check_disk_space() {
+    local dir="$1"
+    local min_space_mb="$2"
+    
+    log "Checking disk space for directory: $dir"
+    
+    # Get available space in KB
+    local available_kb=$(df -k "$dir" | awk 'NR==2 {print $4}')
+    local available_mb=$((available_kb / 1024))
+    local total_kb=$(df -k "$dir" | awk 'NR==2 {print $2}')
+    local total_mb=$((total_kb / 1024))
+    local used_kb=$(df -k "$dir" | awk 'NR==2 {print $3}')
+    local used_mb=$((used_kb / 1024))
+    local used_percent=$(df -k "$dir" | awk 'NR==2 {print $5}')
+    
+    # Store disk space info globally for notifications
+    DISK_SPACE_INFO="Total: ${total_mb} MB | Used: ${used_mb} MB (${used_percent}) | Available: ${available_mb} MB"
+    
+    log "Disk space: $DISK_SPACE_INFO"
+    
+    if [ "$available_mb" -lt "$min_space_mb" ]; then
+        log_error "Insufficient disk space on $dir. Available: $available_mb MB, Required: $min_space_mb MB"
+        return 1
+    fi
+    
+    log "Sufficient disk space available."
+    return 0
 }
 
 # Function to check if required commands exist
@@ -95,9 +164,34 @@ check_requirements() {
         esac
     fi
     
+    # Database backup requirements
+    if [ "$ENABLE_DATABASE_BACKUP" = true ]; then
+        case "$DATABASE_TYPE" in
+            mysql)
+                required_commands+=("mysqldump" "mysql")
+                ;;
+            postgresql)
+                required_commands+=("pg_dump" "psql")
+                ;;
+        esac
+    fi
+    
+    # Security requirements
+    if [ "$ENABLE_ENCRYPTION" = true ]; then
+        required_commands+=("openssl")
+    fi
+    
+    if [ "$ENABLE_BACKUP_VERIFICATION" = true ]; then
+        required_commands+=("sha256sum")
+    fi
+    
+    if [ "$ENABLE_DEDUPLICATION" = true ]; then
+        required_commands+=("sha256sum" "ln")
+    fi
+    
     for cmd in "${required_commands[@]}"; do
         if ! command -v "$cmd" &> /dev/null; then
-            log "Error: Required command '$cmd' not found. Please install it and try again."
+            log_error "Required command '$cmd' not found. Please install it and try again."
             exit 1
         fi
     done
@@ -113,7 +207,7 @@ create_backup_dir() {
     mkdir -p "$BACKUP_DIR"
     
     if [ $? -ne 0 ]; then
-        log "Error: Failed to create backup directory at $BACKUP_DIR"
+        log_error "Failed to create backup directory at $BACKUP_DIR"
         exit 1
     fi
     
@@ -137,12 +231,346 @@ find_latest_incremental_backup() {
         xargs dirname 2>/dev/null || echo ""
 }
 
+# Function to apply file exclusion patterns
+apply_exclusion_patterns() {
+    local source_dir="$1"
+    local exclusion_options=""
+    
+    if [ -z "$FILE_EXCLUSION_PATTERNS" ]; then
+        echo "$exclusion_options"
+        return 0
+    fi
+    
+    # Split comma-separated patterns
+    IFS=',' read -ra PATTERNS <<< "$FILE_EXCLUSION_PATTERNS"
+    
+    for pattern in "${PATTERNS[@]}"; do
+        # Add rsync compatible exclusion option
+        exclusion_options="$exclusion_options --exclude='$pattern'"
+    end
+    
+    echo "$exclusion_options"
+}
+
+# Function to setup deduplication
+setup_deduplication() {
+    if [ "$ENABLE_DEDUPLICATION" != true ]; then
+        return 0
+    fi
+    
+    log "Setting up deduplication..."
+    
+    # Deduplication directory
+    DEDUP_DIR="${DESTINATION_DIR}/.deduplication"
+    mkdir -p "$DEDUP_DIR/objects"
+    
+    # Hash database file path
+    DEDUP_DB="${DEDUP_DIR}/hashes.db"
+    
+    # Create database if it doesn't exist
+    if [ ! -f "$DEDUP_DB" ]; then
+        touch "$DEDUP_DB"
+    fi
+    
+    log "Deduplication setup completed: $DEDUP_DIR"
+    return 0
+}
+
+# Function for file deduplication
+deduplicate_file() {
+    if [ "$ENABLE_DEDUPLICATION" != true ]; then
+        return 0
+    fi
+    
+    local file_path="$1"
+    local rel_path="${file_path#$SOURCE_DIR/}"
+    
+    # Calculate file hash
+    local file_hash=$(sha256sum "$file_path" | awk '{print $1}')
+    
+    # Object file path
+    local obj_path="${DEDUP_DIR}/objects/${file_hash}"
+    
+    # Check hash database
+    if grep -q "^${file_hash}:" "$DEDUP_DB"; then
+        # Hash already exists, create hardlink
+        ln -f "$obj_path" "${BACKUP_DIR}/data/${rel_path}" 2>> "$LOG_FILE"
+        return 0
+    else
+        # New hash, create object and add to database
+        cp -a "$file_path" "$obj_path" 2>> "$LOG_FILE"
+        ln -f "$obj_path" "${BACKUP_DIR}/data/${rel_path}" 2>> "$LOG_FILE"
+        echo "${file_hash}:${rel_path}" >> "$DEDUP_DB"
+        return 0
+    fi
+}
+
+# File encryption function
+encrypt_file() {
+    if [ "$ENABLE_ENCRYPTION" != true ]; then
+        return 0
+    fi
+    
+    local file_path="$1"
+    log "Encrypting file: $file_path"
+    
+    # Generate salt for encryption
+    local salt=$(openssl rand -hex 8)
+    
+    # Encryption
+    openssl enc -aes-256-cbc -salt -pbkdf2 -iter 10000 \
+        -in "$file_path" \
+        -out "${file_path}.enc" \
+        -pass pass:"$ENCRYPTION_PASSWORD" \
+        -S "$salt" 2>> "$LOG_FILE"
+    
+    if [ $? -ne 0 ]; then
+        log_error "Encryption failed: $file_path"
+        return 1
+    fi
+    
+    # Remove original file and rename encrypted file
+    rm "$file_path"
+    mv "${file_path}.enc" "$file_path"
+    
+    # Add salt to file header
+    echo "$salt" > "${file_path}.salt"
+    
+    log "File encryption completed: $file_path"
+    return 0
+}
+
+# File decryption function (for restore)
+decrypt_file() {
+    if [ "$ENABLE_ENCRYPTION" != true ]; then
+        return 0
+    fi
+    
+    local file_path="$1"
+    local output_path="$2"
+    log "Decrypting file: $file_path"
+    
+    # Read salt file
+    if [ ! -f "${file_path}.salt" ]; then
+        log_error "Salt file not found: ${file_path}.salt"
+        return 1
+    fi
+    
+    local salt=$(cat "${file_path}.salt")
+    
+    # Decryption
+    openssl enc -d -aes-256-cbc -salt -pbkdf2 -iter 10000 \
+        -in "$file_path" \
+        -out "$output_path" \
+        -pass pass:"$ENCRYPTION_PASSWORD" \
+        -S "$salt" 2>> "$LOG_FILE"
+    
+    if [ $? -ne 0 ]; then
+        log_error "Decryption failed: $file_path"
+        return 1
+    fi
+    
+    log "File decryption completed: $file_path"
+    return 0
+}
+
+# File verification function
+verify_file() {
+    if [ "$ENABLE_BACKUP_VERIFICATION" != true ]; then
+        return 0
+    fi
+    
+    local file_path="$1"
+    log "Verifying file: $file_path"
+    
+    # Calculate SHA256 hash
+    local file_hash=$(sha256sum "$file_path" | awk '{print $1}')
+    
+    # Write hash to file
+    echo "$file_hash" > "${file_path}.sha256"
+    
+    log "File verification completed: $file_path"
+    return 0
+}
+
+# Backup verification check
+verify_backup_integrity() {
+    if [ "$ENABLE_BACKUP_VERIFICATION" != true ]; then
+        return 0
+    fi
+    
+    log "Starting backup integrity check..."
+    
+    local failed_count=0
+    
+    # Find all hash files and verify
+    find "$BACKUP_DIR" -name "*.sha256" | while read hash_file; do
+        original_file="${hash_file%.sha256}"
+        expected_hash=$(cat "$hash_file")
+        
+        # Check if original file exists
+        if [ ! -f "$original_file" ]; then
+            log_error "File to verify not found: $original_file"
+            failed_count=$((failed_count + 1))
+            continue
+        fi
+        
+        # Calculate and compare hash
+        actual_hash=$(sha256sum "$original_file" | awk '{print $1}')
+        
+        if [ "$expected_hash" != "$actual_hash" ]; then
+            log_error "File integrity error: $original_file"
+            log_error "  Expected: $expected_hash"
+            log_error "  Actual: $actual_hash"
+            failed_count=$((failed_count + 1))
+        fi
+    done
+    
+    if [ $failed_count -eq 0 ]; then
+        log "Backup integrity check completed successfully."
+    else
+        log_error "Backup integrity check completed with $failed_count errors."
+    fi
+    
+    return $failed_count
+}
+
+# MySQL/MariaDB Backup Function
+backup_mysql() {
+    if [ "$ENABLE_DATABASE_BACKUP" != true ] || [ "$DATABASE_TYPE" != "mysql" ]; then
+        return 0
+    fi
+    
+    log "Starting MySQL/MariaDB database backup..."
+    
+    # Create database directory
+    DB_BACKUP_DIR="${BACKUP_DIR}/databases/mysql"
+    mkdir -p "$DB_BACKUP_DIR"
+    
+    # Backup options
+    MYSQLDUMP_OPTIONS="--single-transaction --routines --triggers --events"
+    
+    # Determine databases to backup
+    if [ -z "$DB_NAMES" ]; then
+        # Get all databases (exclude system dbs)
+        DBS=$(mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" -e "SHOW DATABASES;" | grep -v "Database\|information_schema\|performance_schema\|mysql\|sys")
+    else
+        # Get specified databases
+        DBS=$(echo "$DB_NAMES" | tr ',' ' ')
+    fi
+    
+    # Backup each database separately
+    for db in $DBS; do
+        log "Backing up MySQL database: $db"
+        
+        DB_FILE="${DB_BACKUP_DIR}/${db}_${TIMESTAMP}.sql"
+        
+        # Create database backup
+        mysqldump $MYSQLDUMP_OPTIONS -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" "$db" > "$DB_FILE" 2>> "$LOG_FILE"
+        
+        if [ $? -ne 0 ]; then
+            log_error "Failed to backup database $db."
+            continue
+        fi
+        
+        # Compress backup
+        if [ "$ENABLE_COMPRESSION" = true ]; then
+            log "Compressing database backup: $db"
+            gzip -f "$DB_FILE"
+            DB_FILE="${DB_FILE}.gz"
+        fi
+        
+        # Encryption
+        if [ "$ENABLE_ENCRYPTION" = true ]; then
+            encrypt_file "$DB_FILE"
+        fi
+        
+        # Verification
+        if [ "$ENABLE_BACKUP_VERIFICATION" = true ]; then
+            verify_file "$DB_FILE"
+        fi
+        
+        log "Database backup completed: $db"
+    done
+    
+    log "MySQL/MariaDB database backup completed."
+    return 0
+}
+
+# PostgreSQL Backup Function
+backup_postgresql() {
+    if [ "$ENABLE_DATABASE_BACKUP" != true ] || [ "$DATABASE_TYPE" != "postgresql" ]; then
+        return 0
+    fi
+    
+    log "Starting PostgreSQL database backup..."
+    
+    # Create database directory
+    DB_BACKUP_DIR="${BACKUP_DIR}/databases/postgresql"
+    mkdir -p "$DB_BACKUP_DIR"
+    
+    # Set environment variables
+    export PGHOST="$DB_HOST"
+    export PGPORT="$DB_PORT"
+    export PGUSER="$DB_USER"
+    export PGPASSWORD="$DB_PASSWORD"
+    
+    # Determine databases to backup
+    if [ -z "$DB_NAMES" ]; then
+        # Get all databases (exclude template and postgres)
+        DBS=$(psql -t -c "SELECT datname FROM pg_database WHERE datname NOT IN ('template0', 'template1', 'postgres')" postgres)
+    else
+        # Get specified databases
+        DBS=$(echo "$DB_NAMES" | tr ',' ' ')
+    fi
+    
+    # Backup each database separately
+    for db in $DBS; do
+        db=$(echo "$db" | tr -d ' ')
+        if [ -z "$db" ]; then
+            continue
+        fi
+        
+        log "Backing up PostgreSQL database: $db"
+        
+        DB_FILE="${DB_BACKUP_DIR}/${db}_${TIMESTAMP}.sql"
+        
+        # Create database backup (custom format)
+        pg_dump -Fc "$db" > "$DB_FILE" 2>> "$LOG_FILE"
+        
+        if [ $? -ne 0 ]; then
+            log_error "Failed to backup database $db."
+            continue
+        fi
+        
+        # No need for compression as pg_dump -Fc custom format is already compressed
+        
+        # Encryption
+        if [ "$ENABLE_ENCRYPTION" = true ]; then
+            encrypt_file "$DB_FILE"
+        fi
+        
+        # Verification
+        if [ "$ENABLE_BACKUP_VERIFICATION" = true ]; then
+            verify_file "$DB_FILE"
+        fi
+        
+        log "Database backup completed: $db"
+    done
+    
+    # Clean environment variables
+    unset PGHOST PGPORT PGUSER PGPASSWORD
+    
+    log "PostgreSQL database backup completed."
+    return 0
+}
+
 # Function to perform backup
 perform_backup() {
     log "Starting backup process..."
     
     if [ ! -d "$SOURCE_DIR" ]; then
-        log "Error: Source directory '$SOURCE_DIR' does not exist."
+        log_error "Source directory '$SOURCE_DIR' does not exist."
         exit 1
     fi
     
@@ -182,16 +610,35 @@ perform_backup() {
         fi
     fi
     
+    # Setup file exclusion patterns
+    if [ -n "$FILE_EXCLUSION_PATTERNS" ]; then
+        log "Applying file exclusion patterns: $FILE_EXCLUSION_PATTERNS"
+        EXCLUSION_OPTIONS=$(apply_exclusion_patterns "$SOURCE_DIR")
+    else
+        EXCLUSION_OPTIONS=""
+    fi
+    
+    # Setup deduplication if enabled
+    if [ "$ENABLE_DEDUPLICATION" = true ]; then
+        setup_deduplication
+    fi
+    
     if [ "$ENABLE_COMPRESSION" = true ]; then
         log "Creating compressed $BACKUP_TYPE backup..."
         
         if [ "$BACKUP_TYPE" = "full" ]; then
             BACKUP_FILE="${BACKUP_DIR}/backup_full_${TIMESTAMP}.tar.gz"
             
-            tar -czf "$BACKUP_FILE" -C "$(dirname "$SOURCE_DIR")" "$(basename "$SOURCE_DIR")" 2>> "$LOG_FILE"
+            # Apply exclusion patterns if any
+            BACKUP_CMD="tar -czf \"$BACKUP_FILE\" -C \"$(dirname \"$SOURCE_DIR\")\" \"$(basename \"$SOURCE_DIR\")\""
+            if [ -n "$EXCLUSION_OPTIONS" ]; then
+                BACKUP_CMD="tar -czf \"$BACKUP_FILE\" $EXCLUSION_OPTIONS -C \"$(dirname \"$SOURCE_DIR\")\" \"$(basename \"$SOURCE_DIR\")\""
+            fi
+            
+            eval $BACKUP_CMD 2>> "$LOG_FILE"
             
             if [ $? -ne 0 ]; then
-                log "Error: Compression failed."
+                log_error "Compression failed."
                 exit 1
             fi
             
@@ -208,12 +655,20 @@ perform_backup() {
             # Find changed files since last backup
             find "$SOURCE_DIR" -type f -newer "$LAST_BACKUP_REF/.backup_complete" -print > "${BACKUP_DIR}/changed_files.txt"
             
+            # Apply exclusion patterns if any
+            if [ -n "$EXCLUSION_OPTIONS" ]; then
+                # Filter out excluded files
+                TEMP_FILE="${BACKUP_DIR}/temp_changed_files.txt"
+                cat "${BACKUP_DIR}/changed_files.txt" | grep -v -f "$EXCLUSION_OPTIONS" > "$TEMP_FILE"
+                mv "$TEMP_FILE" "${BACKUP_DIR}/changed_files.txt"
+            fi
+            
             # If there are changed files, create the incremental backup
             if [ -s "${BACKUP_DIR}/changed_files.txt" ]; then
                 tar -czf "$BACKUP_FILE" -T "${BACKUP_DIR}/changed_files.txt" 2>> "$LOG_FILE"
                 
                 if [ $? -ne 0 ]; then
-                    log "Error: Incremental compression failed."
+                    log_error "Incremental compression failed."
                     exit 1
                 fi
                 
@@ -232,11 +687,23 @@ perform_backup() {
         log "Creating uncompressed $BACKUP_TYPE backup..."
         
         if [ "$BACKUP_TYPE" = "full" ]; then
-            rsync -aAXv --delete "$SOURCE_DIR/" "$BACKUP_DIR/data/" >> "$LOG_FILE" 2>&1
+            # Apply exclusion patterns if any
+            RSYNC_CMD="rsync -aAXv --delete $EXCLUSION_OPTIONS \"$SOURCE_DIR/\" \"$BACKUP_DIR/data/\""
+            
+            eval $RSYNC_CMD >> "$LOG_FILE" 2>&1
             
             if [ $? -ne 0 ]; then
-                log "Error: Rsync backup failed."
+                log_error "Rsync backup failed."
                 exit 1
+            fi
+            
+            # Apply deduplication if enabled
+            if [ "$ENABLE_DEDUPLICATION" = true ]; then
+                log "Applying deduplication..."
+                find "$BACKUP_DIR/data" -type f | while read file; do
+                    deduplicate_file "$file"
+                done
+                log "Deduplication completed."
             fi
             
             # Mark as full backup
@@ -245,10 +712,12 @@ perform_backup() {
             log "Full rsync backup completed to: $BACKUP_DIR"
         else
             # For uncompressed incremental, use rsync with link-dest to previous backup
-            rsync -aAXv --delete --link-dest="$LAST_BACKUP_REF/data/" "$SOURCE_DIR/" "$BACKUP_DIR/data/" >> "$LOG_FILE" 2>&1
+            RSYNC_CMD="rsync -aAXv --delete $EXCLUSION_OPTIONS --link-dest=\"$LAST_BACKUP_REF/data/\" \"$SOURCE_DIR/\" \"$BACKUP_DIR/data/\""
+            
+            eval $RSYNC_CMD >> "$LOG_FILE" 2>&1
             
             if [ $? -ne 0 ]; then
-                log "Error: Incremental rsync backup failed."
+                log_error "Incremental rsync backup failed."
                 exit 1
             fi
             
@@ -257,6 +726,26 @@ perform_backup() {
             
             log "Incremental rsync backup completed to: $BACKUP_DIR"
         fi
+    fi
+    
+    # Process database backups if enabled
+    if [ "$ENABLE_DATABASE_BACKUP" = true ]; then
+        case "$DATABASE_TYPE" in
+            mysql)
+                backup_mysql
+                ;;
+            postgresql)
+                backup_postgresql
+                ;;
+            *)
+                log_error "Unsupported database type: $DATABASE_TYPE"
+                ;;
+        esac
+    fi
+    
+    # Backup verification if enabled
+    if [ "$ENABLE_BACKUP_VERIFICATION" = true ]; then
+        verify_backup_integrity
     fi
     
     # Create a completion flag file
@@ -276,7 +765,7 @@ upload_to_cloud() {
     case "$CLOUD_PROVIDER" in
         aws_s3)
             if [ -z "$AWS_S3_BUCKET" ]; then
-                log "Error: AWS S3 bucket not specified."
+                log_error "AWS S3 bucket not specified."
                 return 1
             fi
             
@@ -297,14 +786,14 @@ upload_to_cloud() {
             fi
             
             if [ $? -ne 0 ]; then
-                log "Error: AWS S3 upload failed."
+                log_error "AWS S3 upload failed."
                 return 1
             fi
             ;;
             
         ftp)
             if [ -z "$FTP_SERVER" ] || [ -z "$FTP_USER" ] || [ -z "$FTP_PASSWORD" ]; then
-                log "Error: FTP credentials not specified."
+                log_error "FTP credentials not specified."
                 return 1
             fi
             
@@ -330,14 +819,14 @@ upload_to_cloud() {
             fi
             
             if [ $? -ne 0 ]; then
-                log "Error: FTP upload failed."
+                log_error "FTP upload failed."
                 return 1
             fi
             ;;
             
         rsync_ssh)
             if [ -z "$REMOTE_SERVER" ] || [ -z "$REMOTE_USER" ] || [ -z "$REMOTE_PATH" ]; then
-                log "Error: Remote server details not specified."
+                log_error "Remote server details not specified."
                 return 1
             fi
             
@@ -363,7 +852,7 @@ upload_to_cloud() {
             fi
             
             if [ $? -ne 0 ]; then
-                log "Error: Remote server upload failed."
+                log_error "Remote server upload failed."
                 return 1
             fi
             ;;
@@ -373,7 +862,7 @@ upload_to_cloud() {
             ;;
             
         *)
-            log "Error: Unknown cloud provider '$CLOUD_PROVIDER'."
+            log_error "Unknown cloud provider '$CLOUD_PROVIDER'."
             return 1
             ;;
     esac
@@ -446,14 +935,19 @@ send_email_notification() {
     fi
     
     if [ -z "$EMAIL_RECIPIENT" ]; then
-        log "Error: Email recipient not specified."
+        log_error "Email recipient not specified."
         return 1
     fi
     
     log "Sending email notification to $EMAIL_RECIPIENT..."
     
-    local subject="Backup Completed - $(hostname) - ${TIMESTAMP}"
-    local message="Backup of ${SOURCE_DIR} completed successfully on $(date).\n\n"
+    local subject="Backup ${BACKUP_STATUS^^} - $(hostname) - ${TIMESTAMP}"
+    local message="Backup of ${SOURCE_DIR} ${BACKUP_STATUS} on $(date).\n\n"
+    
+    # Add disk space information
+    if [ -n "$DISK_SPACE_INFO" ]; then
+        message+="Disk Space Information:\n${DISK_SPACE_INFO}\n\n"
+    fi
     
     # Add incremental backup info if applicable
     if [ "$ENABLE_INCREMENTAL" = true ]; then
@@ -471,12 +965,18 @@ send_email_notification() {
     
     message+="Backup location: ${BACKUP_DIR}\n"
     message+="Log file: ${LOG_FILE}\n\n"
+    
+    # Add error information if backup failed
+    if [ "$BACKUP_STATUS" = "failed" ]; then
+        message+="ERROR DETAILS:\n${ERROR_MESSAGE}\n\n"
+    fi
+    
     message+="BackupSync by Mursal Aliyev"
     
     echo -e "$message" | mail -s "$subject" "$EMAIL_RECIPIENT"
     
     if [ $? -ne 0 ]; then
-        log "Error: Failed to send email notification."
+        log_error "Failed to send email notification."
         return 1
     fi
     
@@ -491,15 +991,25 @@ send_telegram_notification() {
     fi
     
     if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
-        log "Error: Telegram credentials not specified."
+        log_error "Telegram credentials not specified."
         return 1
     fi
     
     log "Sending Telegram notification..."
     
-    local message="Backup Completed ✅%0A"
+    local status_emoji="✅"
+    if [ "$BACKUP_STATUS" = "failed" ]; then
+        status_emoji="❌"
+    fi
+    
+    local message="Backup ${BACKUP_STATUS^^} ${status_emoji}%0A"
     message+="Host: $(hostname)%0A"
     message+="Time: $(date)%0A"
+    
+    # Add disk space information
+    if [ -n "$DISK_SPACE_INFO" ]; then
+        message+="Disk Space: ${DISK_SPACE_INFO}%0A%0A"
+    fi
     
     # Add incremental backup info if applicable
     if [ "$ENABLE_INCREMENTAL" = true ]; then
@@ -517,13 +1027,18 @@ send_telegram_notification() {
     message+="Source: ${SOURCE_DIR}%0A"
     message+="Destination: ${BACKUP_DIR}"
     
+    # Add error information if backup failed
+    if [ "$BACKUP_STATUS" = "failed" ]; then
+        message+="%0A%0AERROR DETAILS:%0A${ERROR_MESSAGE}"
+    fi
+    
     curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
         -d chat_id="${TELEGRAM_CHAT_ID}" \
         -d text="${message}" \
         >> "$LOG_FILE" 2>&1
     
     if [ $? -ne 0 ]; then
-        log "Error: Failed to send Telegram notification."
+        log_error "Failed to send Telegram notification."
         return 1
     fi
     
@@ -534,7 +1049,7 @@ send_telegram_notification() {
 # Function to restore from backup
 restore_from_backup() {
     if [ -z "$1" ]; then
-        log "Error: No backup specified for restore."
+        log_error "No backup specified for restore."
         return 1
     fi
     
@@ -542,7 +1057,7 @@ restore_from_backup() {
     local target_dir="${2:-$SOURCE_DIR}"
     
     if [ ! -d "$restore_dir" ]; then
-        log "Error: Backup directory '$restore_dir' does not exist."
+        log_error "Backup directory '$restore_dir' does not exist."
         return 1
     fi
     
@@ -556,7 +1071,7 @@ restore_from_backup() {
         local full_backup_dir="${DESTINATION_DIR}/${full_backup_name}"
         
         if [ ! -d "$full_backup_dir" ]; then
-            log "Error: Referenced full backup '$full_backup_dir' not found. Cannot restore."
+            log_error "Referenced full backup '$full_backup_dir' not found. Cannot restore."
             return 1
         fi
         
@@ -646,6 +1161,48 @@ restore_from_backup() {
         fi
     fi
     
+    # Restore from encrypted backups
+    if [ "$ENABLE_ENCRYPTION" = true ]; then
+        log "Decrypting encrypted files..."
+        
+        find "$target_dir" -type f -not -path "*/\.*" | while read file; do
+            if [ -f "${file}.salt" ]; then
+                # This file is encrypted
+                log "Encrypted file found: $file"
+                local temp_file="${file}.decrypted"
+                
+                decrypt_file "$file" "$temp_file"
+                
+                if [ $? -eq 0 ]; then
+                    mv "$temp_file" "$file"
+                    rm "${file}.salt"
+                else
+                    log_error "Could not decrypt file: $file"
+                fi
+            fi
+        done
+    fi
+    
+    # Backup integrity check
+    if [ "$ENABLE_BACKUP_VERIFICATION" = true ]; then
+        log "Verifying integrity of restored files..."
+        
+        find "$target_dir" -name "*.sha256" | while read hash_file; do
+            original_file="${hash_file%.sha256}"
+            expected_hash=$(cat "$hash_file")
+            
+            # Calculate and compare hash
+            actual_hash=$(sha256sum "$original_file" | awk '{print $1}')
+            
+            if [ "$expected_hash" != "$actual_hash" ]; then
+                log_error "Restored file integrity error: $original_file"
+            else
+                # Remove verification file
+                rm "$hash_file"
+            fi
+        done
+    fi
+    
     log "Restore completed successfully."
     return 0
 }
@@ -653,6 +1210,15 @@ restore_from_backup() {
 # Main execution
 main() {
     log "BackupSync started"
+    
+    # Check disk space before proceeding
+    check_disk_space "$DESTINATION_DIR" "$MIN_DISK_SPACE_MB"
+    if [ $? -ne 0 ]; then
+        log_error "Insufficient disk space. Backup aborted."
+        send_email_notification
+        send_telegram_notification
+        exit 1
+    fi
     
     check_requirements
     create_backup_dir
@@ -662,7 +1228,13 @@ main() {
     send_email_notification
     send_telegram_notification
     
-    log "BackupSync completed successfully"
+    if [ "$BACKUP_STATUS" = "success" ]; then
+        log "BackupSync completed successfully"
+        exit 0
+    else
+        log "BackupSync completed with errors"
+        exit 1
+    fi
 }
 
 # Check for restore mode

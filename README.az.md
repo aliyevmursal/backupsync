@@ -9,19 +9,26 @@
 - **Bulud/Şəbəkə Dəstəyi**: Yedəkləri AWS S3, FTP serverləri və ya SSH vasitəsilə uzaq serverlərə yükləyin
 - **Planlaşdırma Dəstəyi**: Cron işləri ilə problemsiz işləmək üçün hazırlanmışdır
 - **Bərpa Funksiyası**: İstənilən tam və ya artımlı yedəkdən asanlıqla bərpa edin
+- **Şifrələmə Dəstəyi**: Yedəklərinizi AES-256 şifrələmə ilə təmin edin
+- **Yedək Doğrulama**: Avtomatik doğrulama ilə yedək bütövlüyünü təmin edin
+- **Verilənlər Bazası Yedəkləməsi**: MySQL/MariaDB və PostgreSQL verilənlər bazaları üçün dəstək
+- **Təkmilləşdirilmiş Yedəkləmə Xüsusiyyətləri**: Fayl istisna nümunələri və dublikat aradan qaldırma
+- **Disk Sahəsi İzləmə**: Yedəkləmədən əvvəl kifayət qədər disk sahəsini avtomatik yoxlayın
 
 ## Tələblər
 
 - Bash shell
 - Standart Linux proqramları (tar, rsync)
 - Bildirişlər üçün: mail əmri (e-poçt üçün) və ya curl (Telegram üçün)
+- Şifrələmə üçün: openssl
+- Verilənlər bazası yedəkləməsi üçün: mysqldump (MySQL/MariaDB) və ya pg_dump (PostgreSQL)
 - Bulud yedəkləməsi üçün: aws CLI (S3 üçün), curl (FTP üçün) və ya rsync/ssh (uzaq serverlər üçün)
 
 ## Quraşdırma
 
 1. Bu reponu klonlayın:
    ```bash
-   git clone https://github.com/aliyevmursal/backup-sync.git
+   git clone https://github.com/aliyevmursal/backupsync.git
    cd backup-sync
    ```
 
@@ -49,6 +56,25 @@ BACKUP_RETENTION_DAYS=30  # Köhnə yedəklərin nə qədər saxlanacağı (0 li
 ENABLE_COMPRESSION=true
 ENABLE_INCREMENTAL=false
 INCREMENTAL_MAX_FULL=7  # Artımlı yedəkləmədən istifadə edərkən tam yedəklər arasında günlər
+
+# Verilənlər bazası yedəkləmə parametrləri
+ENABLE_DATABASE_BACKUP=false
+DATABASE_TYPE="mysql"  # mysql və ya postgresql
+DB_HOST="localhost"
+DB_PORT="3306"  # MySQL üçün 3306, PostgreSQL üçün 5432
+DB_USER="root"
+DB_PASSWORD=""
+DB_NAMES=""  # Bütün verilənlər bazaları üçün boş, xüsusi verilənlər bazaları üçün vergüllə ayrılmış siyahı
+
+# Təkmilləşdirilmiş yedəkləmə xüsusiyyətləri
+FILE_EXCLUSION_PATTERNS="*.tmp,*.log,*~,.git/,.svn/"
+ENABLE_DEDUPLICATION=false
+MIN_DISK_SPACE_MB=1024  # Tələb olunan minimum boş yer MB ilə
+
+# Təhlükəsizlik parametrləri
+ENABLE_ENCRYPTION=false
+ENCRYPTION_PASSWORD=""
+ENABLE_BACKUP_VERIFICATION=true
 
 # Xüsusiyyətləri aktivləşdirin/deaktiv edin
 ENABLE_EMAIL_NOTIFICATION=false
@@ -109,6 +135,55 @@ Faydaları:
 - Bulud yedəkləmələri üçün azaldılmış şəbəkə trafiki
 - İstənilən nöqtədən bərpa etmək qabiliyyətini saxlayır
 
+## Verilənlər Bazası Yedəkləmə Xüsusiyyətləri
+
+BackupSync MySQL/MariaDB və PostgreSQL verilənlər bazalarını yedəkləməyi dəstəkləyir:
+
+### MySQL/MariaDB
+- Saxlanmış prosedurlar, trigerlər və hadisələr ilə tam verilənlər bazası dumpları
+- Xüsusi verilənlər bazalarını və ya bütün verilənlər bazalarını yedəkləmək seçimi
+- Şifrələmə və sıxma xüsusiyyətləri ilə inteqrasiya
+
+### PostgreSQL
+- Səmərəli saxlama üçün xüsusi format yedəkləri
+- Xüsusi verilənlər bazalarını və ya bütün verilənlər bazalarını yedəkləmək seçimi
+- Şifrələmə və doğrulama xüsusiyyətləri ilə inteqrasiya
+
+## Təkmilləşdirilmiş Yedəkləmə Xüsusiyyətləri
+
+### Fayl İstisnası
+Nümunələr istifadə edərək yedəkləmədən çıxarılacaq faylları və qovluqları müəyyən edin:
+```bash
+FILE_EXCLUSION_PATTERNS="*.tmp,*.log,*~,.git/,.svn/"
+```
+
+### Təkrar Aradan Qaldırma (Deduplikasiya)
+Yedəklər arasında təkrarlanan faylları aradan qaldıraraq saxlama yerindən qənaət edin:
+```bash
+ENABLE_DEDUPLICATION=true
+```
+
+### Disk Sahəsi İzləmə
+Yedəkləməyə başlamazdan əvvəl kifayət qədər disk sahəsini avtomatik olaraq yoxlayır:
+```bash
+MIN_DISK_SPACE_MB=1024  # Minimum boş yer MB ilə
+```
+
+## Təhlükəsizlik Xüsusiyyətləri
+
+### Şifrələmə
+Yedəklərinizi AES-256 şifrələmə ilə qoruyun:
+```bash
+ENABLE_ENCRYPTION=true
+ENCRYPTION_PASSWORD="your-secure-password"
+```
+
+### Yedək Doğrulama
+Avtomatik doğrulama ilə yedək bütövlüyünü təmin edin:
+```bash
+ENABLE_BACKUP_VERIFICATION=true
+```
+
 ## Jurnal
 
 Jurnallar vaxt möhürlü fayl adları ilə `logs/` kataloqunda saxlanılır. Hər yedəkləmə əməliyyatı ətraflı jurnal faylı yaradır.
@@ -151,12 +226,24 @@ ENABLE_EMAIL_NOTIFICATION=true
 EMAIL_RECIPIENT="your-email@example.com"
 ```
 
+E-poçtlar bunları əhatə edir:
+- Yedəkləmə vəziyyəti (uğurlu/uğursuz)
+- Yedəkləmə uğursuz olduqda ətraflı səhv məlumatı
+- Disk sahəsi məlumatı
+- Yedəkləmə təfərrüatları (növ, məkan və s.)
+
 ### Telegram Bildirişləri
 ```bash
 ENABLE_TELEGRAM_NOTIFICATION=true
 TELEGRAM_BOT_TOKEN="your-bot-token"
 TELEGRAM_CHAT_ID="your-chat-id"
 ```
+
+Telegram mesajları bunları əhatə edir:
+- Vizual göstərici ilə yedəkləmə vəziyyəti (✅/❌)
+- Disk sahəsi metrikləri
+- Yedəkləmə təfərrüatları
+- Yedəkləmə uğursuz olduqda səhv məlumatı
 
 ## Lisenziya
 
