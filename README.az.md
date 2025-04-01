@@ -1,3 +1,11 @@
+| Language | README |
+| --- | --- |
+| <img src="https://raw.githubusercontent.com/lipis/flag-icons/main/flags/4x3/us.svg" width="22"> 🇺🇸 Английский | [English](README.md) |
+| <img src="https://raw.githubusercontent.com/lipis/flag-icons/main/flags/4x3/tr.svg" width="22"> 🇹🇷 Турецкий | [Türkçe](README.tr.md) |
+| <img src="https://raw.githubusercontent.com/lipis/flag-icons/main/flags/4x3/az.svg" width="22"> 🇦🇿 Азербайджанский | [Azərbaycanca](README.az.md) |
+| <img src="https://raw.githubusercontent.com/lipis/flag-icons/main/flags/4x3/ru.svg" width="22"> 🇷🇺 Русский | [Русский](README.ru.md) |
+
+
 ## Xüsusiyyətlər
 
 - **Vaxt Möhürlü Yedəklər**: Hər yedəkləmə əməliyyatı üçün unikal vaxt möhürlü qovluq yaradır
