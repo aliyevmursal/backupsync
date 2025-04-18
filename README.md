@@ -22,7 +22,7 @@ A comprehensive backup solution for Linux system administrators with advanced fe
 - **🔄 Restore Functionality**: Easily restore from any full or incremental backup
 - **🔐 Encryption Support**: Secure your backups with AES-256 encryption
 - **✅ Backup Verification**: Ensure backup integrity with automatic verification
-- **🗃️ Database Backup**: Support for MySQL/MariaDB and PostgreSQL databases
+- **🗃️ Database Backup**: Support for MySQL/MariaDB, PostgreSQL, and MSSQL databases
 - **⚙️ Advanced Backup Features**: File exclusion patterns and deduplication
 - **💾 Disk Space Monitoring**: Automatically check for sufficient disk space before backup
 
@@ -32,7 +32,7 @@ A comprehensive backup solution for Linux system administrators with advanced fe
 - Standard Linux utilities (tar, rsync)
 - For notifications: mail command (for email) or curl (for Telegram)
 - For encryption: openssl
-- For database backup: mysqldump (MySQL/MariaDB) or pg_dump (PostgreSQL)
+- For database backup: mysqldump (MySQL/MariaDB), pg_dump (PostgreSQL), or sqlcmd (MSSQL)
 - For cloud backup: aws CLI (for S3), curl (for FTP), or rsync/ssh (for remote servers)
 
 ## Installation
@@ -70,12 +70,17 @@ INCREMENTAL_MAX_FULL=7  # Days between full backups when using incremental
 
 # Database backup settings
 ENABLE_DATABASE_BACKUP=false
-DATABASE_TYPE="mysql"  # mysql or postgresql
+DATABASE_TYPE="mysql"  # mysql, postgresql, or mssql
 DB_HOST="localhost"
-DB_PORT="3306"  # 3306 for MySQL, 5432 for PostgreSQL
+DB_PORT="3306"  # 3306 for MySQL, 5432 for PostgreSQL, 1433 for MSSQL
 DB_USER="root"
 DB_PASSWORD=""
 DB_NAMES=""  # Empty for all databases, comma-separated list for specific ones
+
+# MSSQL Specific Settings
+MSSQL_AUTH_TYPE="sql"  # sql or windows
+MSSQL_INSTANCE=""  # Empty for default instance
+MSSQL_BACKUP_TYPE="full"  # full, differential, or log
 
 # Advanced backup features
 FILE_EXCLUSION_PATTERNS="*.tmp,*.log,*~,.git/,.svn/"
@@ -148,7 +153,7 @@ Benefits:
 
 ## Database Backup Features
 
-BackupSync supports backing up MySQL/MariaDB and PostgreSQL databases:
+BackupSync supports backing up MySQL/MariaDB, PostgreSQL, and Microsoft SQL Server databases:
 
 ### MySQL/MariaDB
 - Full database dumps with stored procedures, triggers, and events
@@ -158,6 +163,13 @@ BackupSync supports backing up MySQL/MariaDB and PostgreSQL databases:
 ### PostgreSQL
 - Custom format backups for efficient storage
 - Option to backup specific databases or all databases
+- Integration with encryption and verification features
+
+### Microsoft SQL Server
+- Support for SQL and Windows authentication methods
+- Support for different backup types (Full, Differential, Log)
+- Option to specify a named instance or default instance
+- Backup to BAK files with compression support
 - Integration with encryption and verification features
 
 ## Advanced Backup Features

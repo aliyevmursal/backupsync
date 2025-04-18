@@ -14,7 +14,7 @@
 #   - Auto cleanup
 #   - Cloud/Network backup
 #   - Cron scheduling support
-#   - Database backup support
+#   - Database backup support (MySQL, PostgreSQL, MSSQL)
 #   - Advanced backup features
 #   - Security enhancements
 #   - Disk space monitoring
@@ -68,6 +68,11 @@ DB_PORT="${DB_PORT:-3306}"
 DB_USER="${DB_USER:-root}"
 DB_PASSWORD="${DB_PASSWORD:-}"
 DB_NAMES="${DB_NAMES:-}"
+
+# MSSQL specific settings
+MSSQL_AUTH_TYPE="${MSSQL_AUTH_TYPE:-sql}"
+MSSQL_INSTANCE="${MSSQL_INSTANCE:-}"
+MSSQL_BACKUP_TYPE="${MSSQL_BACKUP_TYPE:-full}"
 
 # Advanced backup settings
 FILE_EXCLUSION_PATTERNS="${FILE_EXCLUSION_PATTERNS:-}"
@@ -173,6 +178,9 @@ check_requirements() {
             postgresql)
                 required_commands+=("pg_dump" "psql")
                 ;;
+            mssql)
+                required_commands+=("sqlcmd")
+                ;;
         esac
     fi
     
@@ -247,7 +255,7 @@ apply_exclusion_patterns() {
     for pattern in "${PATTERNS[@]}"; do
         # Add rsync compatible exclusion option
         exclusion_options="$exclusion_options --exclude='$pattern'"
-    end
+    done
     
     echo "$exclusion_options"
 }
@@ -565,6 +573,112 @@ backup_postgresql() {
     return 0
 }
 
+# Microsoft SQL Server Backup Function
+backup_mssql() {
+    if [ "$ENABLE_DATABASE_BACKUP" != true ] || [ "$DATABASE_TYPE" != "mssql" ]; then
+        return 0
+    fi
+    
+    log "Starting Microsoft SQL Server database backup..."
+    
+    # Create database directory
+    DB_BACKUP_DIR="${BACKUP_DIR}/databases/mssql"
+    mkdir -p "$DB_BACKUP_DIR"
+    
+    # Build the server instance string
+    if [ -n "$MSSQL_INSTANCE" ]; then
+        # Use named instance
+        SERVER_INSTANCE="$DB_HOST\\$MSSQL_INSTANCE"
+    else
+        # Use default instance with port
+        SERVER_INSTANCE="$DB_HOST,$DB_PORT"
+    fi
+    
+    # Build the authentication arguments
+    if [ "$MSSQL_AUTH_TYPE" = "windows" ]; then
+        # Windows authentication
+        AUTH_ARGS="-E"
+    else
+        # SQL Server authentication
+        AUTH_ARGS="-U $DB_USER -P $DB_PASSWORD"
+    fi
+    
+    # Determine databases to backup
+    if [ -z "$DB_NAMES" ]; then
+        # Get all user databases (exclude system dbs)
+        DBS=$(sqlcmd -S "$SERVER_INSTANCE" $AUTH_ARGS -h-1 -Q "SET NOCOUNT ON; SELECT name FROM sys.databases WHERE database_id > 4;" | grep -v "[-]")
+    else
+        # Get specified databases
+        DBS=$(echo "$DB_NAMES" | tr ',' ' ')
+    fi
+    
+    # Backup each database separately
+    for db in $DBS; do
+        db=$(echo "$db" | tr -d ' ')
+        if [ -z "$db" ]; then
+            continue
+        fi
+        
+        log "Backing up MSSQL database: $db"
+        
+        # Define backup file path
+        DB_BAK_FILE="${DB_BACKUP_DIR}/${db}_${TIMESTAMP}.bak"
+        
+        # Determine backup type (FULL, DIFFERENTIAL, LOG)
+        case "$MSSQL_BACKUP_TYPE" in
+            full)
+                BACKUP_TYPE="FULL"
+                ;;
+            differential)
+                BACKUP_TYPE="DIFFERENTIAL"
+                ;;
+            log)
+                BACKUP_TYPE="LOG"
+                ;;
+            *)
+                log_error "Unknown MSSQL backup type: $MSSQL_BACKUP_TYPE. Using FULL."
+                BACKUP_TYPE="FULL"
+                ;;
+        esac
+        
+        # Build and execute the backup command
+        BACKUP_QUERY="BACKUP DATABASE [$db] TO DISK='$DB_BAK_FILE' WITH $BACKUP_TYPE, INIT, STATS=10"
+        if [ "$BACKUP_TYPE" = "LOG" ]; then
+            BACKUP_QUERY="BACKUP LOG [$db] TO DISK='$DB_BAK_FILE' WITH INIT, STATS=10"
+        fi
+        
+        log "Executing SQL Server backup: $BACKUP_QUERY"
+        sqlcmd -S "$SERVER_INSTANCE" $AUTH_ARGS -Q "$BACKUP_QUERY" >> "$LOG_FILE" 2>&1
+        
+        if [ $? -ne 0 ]; then
+            log_error "Failed to backup SQL Server database $db."
+            continue
+        fi
+        
+        # Compress backup (BAK files are binary but can still be compressed)
+        if [ "$ENABLE_COMPRESSION" = true ]; then
+            log "Compressing database backup: $db"
+            gzip -f "$DB_BAK_FILE"
+            DB_BAK_FILE="${DB_BAK_FILE}.gz"
+        fi
+        
+        # Encryption
+        if [ "$ENABLE_ENCRYPTION" = true ]; then
+            encrypt_file "$DB_BAK_FILE"
+        fi
+        
+        # Verification
+        if [ "$ENABLE_BACKUP_VERIFICATION" = true ]; then
+            verify_file "$DB_BAK_FILE"
+        fi
+        
+        log "SQL Server database backup completed: $db"
+    done
+    
+    log "Microsoft SQL Server database backup completed."
+    return 0
+}
+
 # Function to perform backup
 perform_backup() {
     log "Starting backup process..."
@@ -736,6 +850,9 @@ perform_backup() {
                 ;;
             postgresql)
                 backup_postgresql
+                ;;
+            mssql)
+                backup_mssql
                 ;;
             *)
                 log_error "Unsupported database type: $DATABASE_TYPE"
